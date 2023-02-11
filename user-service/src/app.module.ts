@@ -11,6 +11,6 @@ import { HealthModule } from './health/health.module';
     MongooseModule.forRootAsync({ useFactory: mongoConfig }),
     UserModule,
     HealthModule,
-  ]
+  ],
 })
 export class AppModule {}
