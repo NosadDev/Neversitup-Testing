@@ -105,6 +105,7 @@ export class OrderService {
             { returnDocument: 'after' },
           )
           .then((r) => {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { products, ...response } = r.toJSON();
             return response;
           });

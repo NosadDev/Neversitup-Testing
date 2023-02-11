@@ -1,15 +1,6 @@
-import {
-  BadRequestException,
-  Controller,
-  Inject,
-  Post,
-  ServiceUnavailableException,
-} from '@nestjs/common';
-import { ClientProxy, MessagePattern } from '@nestjs/microservices';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { BadRequestException, Controller } from '@nestjs/common';
+import { MessagePattern } from '@nestjs/microservices';
 import { ObjectId } from 'bson';
-import { Order, OrderDocument } from 'src/common/database/schemas/order.schema';
 import { OrderService } from './order.service';
 
 @Controller('order')
