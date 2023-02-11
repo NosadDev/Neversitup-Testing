@@ -45,6 +45,10 @@ export class OrderController {
     ) {
       return new BadRequestException('Invalid Object ID');
     } else {
+      data.products = data.products.map((v) => ({
+        ...v,
+        _id: new ObjectId(v._id),
+      }));
       return this.orderSerive.createOrder(data);
     }
   }

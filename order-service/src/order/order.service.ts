@@ -22,16 +22,28 @@ export class OrderService {
   ) {}
 
   async findOrder(data) {
-    return await this.orderModel
-      .findOne(data)
-      .then((r) =>
-        r == null
-          ? new NotFoundException(`Not found Order _id: ${data._id}`)
-          : r,
-      )
-      .catch((e) => {
-        return new ServiceUnavailableException(e.message);
-      });
+    try {
+      const order = await this.orderModel.findOne(data).lean();
+      if (order == null) {
+        return new NotFoundException(`Not found Order _id: ${data._id}`);
+      } else {
+        const products = await Promise.all(
+          order.products.map(async (v) => {
+            const product = await lastValueFrom(
+              this.productClient.send('product.id', v._id),
+            );
+            return {
+              ...v,
+              name: product.name,
+              description: product.description,
+            };
+          }),
+        );
+        return { ...order, products };
+      }
+    } catch (error) {
+      return new ServiceUnavailableException(error.message);
+    }
   }
 
   async orderHistory(data) {
@@ -67,7 +79,9 @@ export class OrderService {
         summary: product.price * v.qty,
       };
     });
-    data.summary = data.products.reduce((a, b) => a.summary + b.summary);
+    data.summary = data.products.reduce((a, b) => a.summary + b.summary, {
+      summary: 0,
+    });
     return new this.orderModel(data)
       .save()
       .then((r) => r)
@@ -82,6 +96,21 @@ export class OrderService {
       return new NotFoundException(`Not found order _id: ${data._id}`);
     } else if (exists.isCancel == true) {
       return new ConflictException(`Order _id: ${data._id} already cancel`);
+    } else {
+      try {
+        return await this.orderModel
+          .findOneAndUpdate(
+            { _id: data._id },
+            { $set: { isCancel: true } },
+            { returnDocument: 'after' },
+          )
+          .then((r) => {
+            const { products, ...response } = r.toJSON();
+            return response;
+          });
+      } catch (error) {
+        return new ServiceUnavailableException(error.message);
+      }
     }
   }
 }

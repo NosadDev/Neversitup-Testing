@@ -3,17 +3,15 @@ import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Order, OrderSchema } from 'src/common/database/schemas/order.schema';
-import { ClientsModule, Transport } from '@nestjs/microservices';
+import { ClientsModule } from '@nestjs/microservices';
+import { productServiceConfig } from 'src/config/service.config';
 
 @Module({
   imports: [
-    ClientsModule.register([
+    ClientsModule.registerAsync([
       {
         name: 'PRODUCT_SERVICE',
-        transport: Transport.TCP,
-        options: {
-          port: 3003,
-        },
+        useFactory: productServiceConfig,
       },
     ]),
     MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),

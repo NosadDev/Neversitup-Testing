@@ -14,7 +14,12 @@ export class Order {
   auth: Record<string, any>;
 
   @Prop()
-  products: Array<{ _id: ObjectId; qty: number }>;
+  products: Array<{
+    _id: ObjectId;
+    qty: number;
+    ppu: number;
+    summary: number;
+  }>;
 
   @Prop()
   summary: number;
