@@ -20,9 +20,9 @@ export class ServiceErrorInterceptor implements NestInterceptor {
       }),
       catchError((e) => {
         if (e['code'] == 'ECONNREFUSED') {
-            throw new ServiceUnavailableException('Unable to connect service')
-        }else{
-            throw e;
+          throw new ServiceUnavailableException('Unable to connect service');
+        } else {
+          throw e;
         }
       }),
     );
