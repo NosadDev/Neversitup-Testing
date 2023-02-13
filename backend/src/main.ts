@@ -15,10 +15,10 @@ async function bootstrap() {
   app.enableVersioning({
     type: VersioningType.URI,
     defaultVersion: 'v1',
-    prefix: '',
+    prefix: 'api/',
   });
   const config = new DocumentBuilder()
-    .setTitle('Neversitup Exam API')
+    .setTitle('Neversitup Testing API')
     .setVersion(process.env.npm_package_version)
     .addBearerAuth(
       { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },

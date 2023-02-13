@@ -1,3 +1,3 @@
 # Neversitup Backend Test (Nodejs)
 
-Document at: http://backend/docs (swagger)
+Document at: https://neversitup-testing.nosad.dev/docs (swagger)

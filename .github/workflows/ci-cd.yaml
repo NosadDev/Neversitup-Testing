@@ -1,0 +1,440 @@
+name: CI/CD
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+jobs:
+  # Backend
+  lint-backend:
+    name: Lint Backend
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Setup Nodejs
+        uses: actions/setup-node@v3.6.0
+        with:
+          node-version: 18.14.0
+      - name: Run CI
+        run: |
+          mv package.json package.json.back
+          mv package-lock.json package-lock.json.back
+          npm i -D @typescript-eslint/eslint-plugin @typescript-eslint/parser eslint eslint-config-prettier eslint-plugin-prettier
+          mv package.json.back package.json
+          mv package-lock.json.back package-lock.json
+          npm run lint
+          rm -rf node_modules
+
+  build-backend:
+    name: Build Backend
+    environment: production
+    runs-on: self-hosted
+    needs: ["lint-backend"]
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Docker Login
+        uses: docker/login-action@v2.1.0
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Set env file
+        run: |
+          echo "${{ secrets.BACKEND_ENV }}" > .env
+
+      - name: Build and push Backend Docker image
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: ./backend
+          no-cache: true
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-backend:latest
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-backend:${{ github.sha }}
+      - name: Cleaning up image
+        run: |
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-backend:latest
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-backend:${{ github.sha }}
+
+  deploy-backend:
+    name: Deploy Backend
+    environment: production
+    runs-on: self-hosted
+    needs: ["build-backend"]
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Replace env Deployment
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: backend
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          IMAGE: ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-backend:${{ github.sha }}
+          CONTAINER_PORT: 3000
+        with:
+          from_file: "kubernetes/templates/deployment.yaml"
+          to_file: "backend/kubernetes/deployment.yaml"
+          commit: "false"
+
+      - name: Replace env Service
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: backend
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          PORT: 80
+          TARGET_PORT: 3000
+        with:
+          from_file: "kubernetes/templates/service.yaml"
+          to_file: "backend/kubernetes/service.yaml"
+          commit: "false"
+
+      - name: Replace env Ingress
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: backend
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          INGRESS_CLASS: ${{ secrets.INGRESS_CLASS }}
+          ISSUER: ${{ secrets.ISSUER }}
+          DNS_NAME: ${{ secrets.DNS_NAME }}
+          SERVICE_PORT: 80
+          TLS_HOSTS: ${{ secrets.TLS_HOSTS }}
+          TLS_SECRET_NAME: ${{ secrets.TLS_SECRET_NAME }}
+        with:
+          from_file: "kubernetes/templates/ingress.yaml"
+          to_file: "backend/kubernetes/ingress.yaml"
+          commit: "false"
+
+      - name: Azure Kubernetes set context
+        uses: azure/k8s-set-context@v3
+        with:
+          method: service-account
+          k8s-url: ${{ secrets.KUBERNETES_URL }}
+          k8s-secret: ${{ secrets.KUBERNETES_SECRET }}
+
+      - name: Deploy to Kubernetes cluster
+        uses: Azure/k8s-deploy@v4.9
+        with:
+          pull-images: false
+          namespace: prod
+          manifests: |
+            backend/kubernetes/deployment.yaml
+            backend/kubernetes/service.yaml
+            backend/kubernetes/ingress.yaml
+
+  # User Service
+  lint-user-service:
+    name: Lint User Service
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: ./user-service
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Setup Nodejs
+        uses: actions/setup-node@v3.6.0
+        with:
+          node-version: 18.14.0
+      - name: Run CI
+        run: |
+          mv package.json package.json.back
+          mv package-lock.json package-lock.json.back
+          npm i -D @typescript-eslint/eslint-plugin @typescript-eslint/parser eslint eslint-config-prettier eslint-plugin-prettier
+          mv package.json.back package.json
+          mv package-lock.json.back package-lock.json
+          npm run lint
+
+  build-user-service:
+    name: Build User Service
+    environment: production
+    runs-on: self-hosted
+    needs: ["lint-user-service"]
+    defaults:
+      run:
+        working-directory: ./user-service
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Docker Login
+        uses: docker/login-action@v2.1.0
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Set env file
+        run: |
+          echo "${{ secrets.USER_SERVICE_ENV }}" > .env
+
+      - name: Build and push User Service Docker image
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: ./user-service
+          no-cache: true
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-user-service:latest
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-user-service:${{ github.sha }}
+      - name: Cleaning up image
+        run: |
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-user-service:latest
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-user-service:${{ github.sha }}
+
+  deploy-user-service:
+    name: Deploy User Service
+    environment: production
+    runs-on: self-hosted
+    needs: ["build-user-service"]
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Replace env Deployment
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: user-service
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          IMAGE: ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-user-service:${{ github.sha }}
+          CONTAINER_PORT: 8000
+        with:
+          from_file: "kubernetes/templates/deployment.yaml"
+          to_file: "user-service/kubernetes/deployment.yaml"
+          commit: "false"
+
+      - name: Replace env Service
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: user-service
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          PORT: 8000
+          TARGET_PORT: 8000
+        with:
+          from_file: "kubernetes/templates/service.yaml"
+          to_file: "user-service/kubernetes/service.yaml"
+          commit: "false"
+
+      - name: Azure Kubernetes set context
+        uses: azure/k8s-set-context@v3
+        with:
+          method: service-account
+          k8s-url: ${{ secrets.KUBERNETES_URL }}
+          k8s-secret: ${{ secrets.KUBERNETES_SECRET }}
+
+      - name: Deploy to Kubernetes cluster
+        uses: Azure/k8s-deploy@v4.9
+        with:
+          pull-images: false
+          namespace: prod
+          manifests: |
+            user-service/kubernetes/deployment.yaml
+            user-service/kubernetes/service.yaml
+
+  # Product Service
+  lint-product-service:
+    name: Lint Product Service
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: ./product-service
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Setup Nodejs
+        uses: actions/setup-node@v3.6.0
+        with:
+          node-version: 18.14.0
+      - name: Run CI
+        run: |
+          mv package.json package.json.back
+          mv package-lock.json package-lock.json.back
+          npm i -D @typescript-eslint/eslint-plugin @typescript-eslint/parser eslint eslint-config-prettier eslint-plugin-prettier
+          mv package.json.back package.json
+          mv package-lock.json.back package-lock.json
+          npm run lint
+
+  build-product-service:
+    name: Build Product Service
+    environment: production
+    runs-on: self-hosted
+    needs: ["lint-product-service"]
+    defaults:
+      run:
+        working-directory: ./product-service
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Docker Login
+        uses: docker/login-action@v2.1.0
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Set env file
+        run: |
+          echo "${{ secrets.PRODUCT_SERVICE_ENV }}" > .env
+
+      - name: Build and push Product Service Docker image
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: ./product-service
+          no-cache: true
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-product-service:latest
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-product-service:${{ github.sha }}
+      - name: Cleaning up image
+        run: |
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-product-service:latest
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-product-service:${{ github.sha }}
+
+  deploy-product-service:
+    name: Deploy Product Service
+    environment: production
+    runs-on: self-hosted
+    needs: ["build-product-service"]
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Replace env Deployment
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: product-service
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          IMAGE: ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-product-service:${{ github.sha }}
+          CONTAINER_PORT: 8000
+        with:
+          from_file: "kubernetes/templates/deployment.yaml"
+          to_file: "product-service/kubernetes/deployment.yaml"
+          commit: "false"
+
+      - name: Replace env Service
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: product-service
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          PORT: 8000
+          TARGET_PORT: 8000
+        with:
+          from_file: "kubernetes/templates/service.yaml"
+          to_file: "product-service/kubernetes/service.yaml"
+          commit: "false"
+
+      - name: Azure Kubernetes set context
+        uses: azure/k8s-set-context@v3
+        with:
+          method: service-account
+          k8s-url: ${{ secrets.KUBERNETES_URL }}
+          k8s-secret: ${{ secrets.KUBERNETES_SECRET }}
+
+      - name: Deploy to Kubernetes cluster
+        uses: Azure/k8s-deploy@v4.9
+        with:
+          pull-images: false
+          namespace: prod
+          manifests: |
+            product-service/kubernetes/deployment.yaml
+            product-service/kubernetes/service.yaml
+
+  # Order Service
+  lint-order-service:
+    name: Lint Order Service
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: ./order-service
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Setup Nodejs
+        uses: actions/setup-node@v3.6.0
+        with:
+          node-version: 18.14.0
+      - name: Run CI
+        run: |
+          mv package.json package.json.back
+          mv package-lock.json package-lock.json.back
+          npm i -D @typescript-eslint/eslint-plugin @typescript-eslint/parser eslint eslint-config-prettier eslint-plugin-prettier
+          mv package.json.back package.json
+          mv package-lock.json.back package-lock.json
+          npm run lint
+
+  build-order-service:
+    name: Build Order Service
+    environment: production
+    runs-on: self-hosted
+    needs: ["lint-order-service"]
+    defaults:
+      run:
+        working-directory: ./order-service
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Docker Login
+        uses: docker/login-action@v2.1.0
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Set env file
+        run: |
+          echo "${{ secrets.ORDER_SERVICE_ENV }}" > .env
+
+      - name: Build and push Order Service Docker image
+        uses: docker/build-push-action@v4.0.0
+        with:
+          context: ./order-service
+          no-cache: true
+          push: true
+          tags: |
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-order-service:latest
+            ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-order-service:${{ github.sha }}
+      - name: Cleaning up image
+        run: |
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-order-service:latest
+          docker image rm ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-order-service:${{ github.sha }}
+
+  deploy-order-service:
+    name: Deploy Order Service
+    environment: production
+    runs-on: self-hosted
+    needs: ["build-order-service"]
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Replace env Deployment
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: order-service
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          IMAGE: ${{ secrets.REGISTRY_URL }}/${{ secrets.REGISTRY_USERNAME }}/${{ secrets.IMAGE_NAME }}-order-service:${{ github.sha }}
+          CONTAINER_PORT: 8000
+        with:
+          from_file: "kubernetes/templates/deployment.yaml"
+          to_file: "order-service/kubernetes/deployment.yaml"
+          commit: "false"
+
+      - name: Replace env Service
+        uses: franzbischoff/replace_envs@v1
+        env:
+          NAME: order-service
+          PREFIX: ${{ secrets.IMAGE_NAME }}
+          PORT: 8000
+          TARGET_PORT: 8000
+        with:
+          from_file: "kubernetes/templates/service.yaml"
+          to_file: "order-service/kubernetes/service.yaml"
+          commit: "false"
+
+      - name: Azure Kubernetes set context
+        uses: azure/k8s-set-context@v3
+        with:
+          method: service-account
+          k8s-url: ${{ secrets.KUBERNETES_URL }}
+          k8s-secret: ${{ secrets.KUBERNETES_SECRET }}
+
+      - name: Deploy to Kubernetes cluster
+        uses: Azure/k8s-deploy@v4.9
+        with:
+          pull-images: false
+          namespace: prod
+          manifests: |
+            order-service/kubernetes/deployment.yaml
+            order-service/kubernetes/service.yaml
